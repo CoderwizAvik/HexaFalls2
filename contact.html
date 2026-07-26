@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UdyogSathi | Schedule Meeting</title>
+    
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        // --- Tailwind Configuration (Dark Theme) ---
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-darkest': '#0D1117',
+                        'bg-medium': '#161B22',
+                        'bg-light': '#21262D',
+                        'text-light': '#F0F6FC',
+                        'accent-blue': '#58A6FF',
+                        'secondary-gold': '#FBBF24',
+                        'status-green': '#3FB950',
+                        'status-red': '#F85149',
+                        'status-yellow': '#FBBF24',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+
+        // --- GLOBAL FIREBASE VARIABLES (MANDATORY) ---
+        let db, auth;
+        let userId = 'loading';
+        let appId = 'default-app-id';
+        // Read configuration from environment variable
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+        // ---------------------------------------------
+
+        // --- Utility for custom notifications (replacing alert()) ---
+        const showMessage = (message, type = 'info') => {
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+            
+            messageText.textContent = message;
+            
+            let bgColor = 'bg-accent-blue';
+            let icon = 'i'; 
+
+            if (type === 'success') {
+                bgColor = 'bg-status-green';
+                icon = '✔';
+            } else if (type === 'error') {
+                bgColor = 'bg-status-red';
+                icon = '✖';
+            } else if (type === 'warning') {
+                bgColor = 'bg-status-yellow';
+                icon = '⚠';
+            }
+
+            messageBox.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-2xl z-50 transform transition-all duration-300 ${bgColor}`;
+            document.getElementById('messageIcon').textContent = icon;
+            messageBox.style.transform = 'translateY(0)';
+            messageBox.style.opacity = '1';
+
+            setTimeout(() => {
+                messageBox.style.transform = 'translateY(100%)';
+                messageBox.style.opacity = '0';
+            }, 5000);
+        };
+
+        // --- Firestore Utilities ---
+        const getMeetingCollectionRef = () => {
+            // Private data path: /artifacts/{appId}/users/{userId}/meetings
+            if (!db || !userId || userId === 'loading') {
+                console.error("Firestore or User ID not ready.");
+                return null;
+            }
+            return collection(db, 'artifacts', appId, 'users', userId, 'meetings');
+        };
+
+        // --- Scheduling Logic (called by form submission) ---
+        const scheduleMeeting = async (event) => {
+            event.preventDefault();
+            
+            // Check for Firestore readiness
+            if (!db || userId === 'loading' || !getMeetingCollectionRef()) {
+                showMessage("Database connection not ready. Please wait a moment and try again.", 'warning');
+                return;
+            }
+
+            // Disable button and show loading state
+            const submitButton = document.getElementById('submitButton');
+            const originalText = submitButton.textContent;
+            submitButton.textContent = 'Scheduling...';
+            submitButton.disabled = true;
+
+            try {
+                // Collect data
+                const meetingType = document.getElementById('meetingType').value;
+                const date = document.getElementById('dateSelect').value;
+                const timeSlot = document.getElementById('timeSelect').value;
+                const issueDescription = document.getElementById('formIssue').value;
+
+                if (!date || !timeSlot || !meetingType || !issueDescription) {
+                    showMessage("Please fill in all required fields.", 'warning');
+                    return;
+                }
+
+                const meetingData = {
+                    workerId: userId,
+                    manager: 'Asha Sharma',
+                    type: meetingType,
+                    // Store date and time combined for easier sorting/filtering
+                    dateTime: `${date}T${timeSlot}:00`,
+                    description: issueDescription,
+                    status: 'Pending Review',
+                    createdAt: new Date(),
+                };
+
+                await addDoc(getMeetingCollectionRef(), meetingData);
+
+                // Success feedback
+                showMessage(`Success! Your ${meetingType} meeting has been scheduled with Asha Sharma on ${date} at ${timeSlot}. A confirmation ID has been logged in the console.`, 'success');
+                
+                // Clear form and reset availability
+                document.getElementById('meetingForm').reset();
+                checkAvailability(); 
+                
+            } catch (error) {
+                console.error("Error scheduling meeting:", error);
+                showMessage(`Error scheduling meeting: ${error.message}`, 'error');
+            } finally {
+                // Restore button state (checkAvailability will re-enable if a valid slot is chosen)
+                submitButton.textContent = originalText;
+                checkAvailability();
+            }
+        };
+
+
+        // --- Translation Data and Logic (unchanged from previous version) ---
+        const translations = { /* ... (omitted for brevity, remains the same) ... */
+            en: {
+                pageTitle: "Schedule a Meeting",
+                selectLang: "Select Language",
+                heroHeading: "Connect with Our Support Team",
+                heroSubheading: "Book a 15-minute consultation for urgent support, issue resolution, or business inquiries.",
+                formTypeLabel: "Meeting Type",
+                formTypePlaceholder: "Select meeting type",
+                typeVideo: "Video Call (Zoom/GMeet)",
+                typePhone: "Phone Call (Local/Regional)",
+                typeInPerson: "In-Person (Office Visit)",
+                formDateLabel: "Select Date",
+                formTimeLabel: "Select Time Slot (15 Min)",
+                formIssueLabel: "Briefly Describe Your Issue",
+                formIssuePlaceholder: "e.g., 'Payment issue on Job #1234' or 'Need help with profile setup'",
+                managerTitle: "Your Communication Manager",
+                managerName: "Asha Sharma",
+                managerRole: "Worker Success & Grievance Lead",
+                managerBio: "Asha handles all scheduled worker meetings, focusing on quick dispute resolution, payment issues, and platform guidance.",
+                managerContact: "Contact Hours: Mon-Fri, 10:00 AM to 5:00 PM (IST)",
+                statusAvailable: "🟢 Available Now: Book Instantly!",
+                statusUnavailable: "🔴 Unavailable: Please choose another time.",
+                statusPending: "Checking availability...",
+                buttonSubmit: "Confirm Meeting Schedule",
+                footerText: "We are committed to providing dedicated, human support for our workforce.",
+            },
+            hi: {
+                pageTitle: "एक मीटिंग शेड्यूल करें",
+                selectLang: "भाषा चुने",
+                heroHeading: "हमारी सहायता टीम से जुड़ें",
+                heroSubheading: "तत्काल समर्थन, समस्या समाधान या व्यावसायिक पूछताछ के लिए 15 मिनट का परामर्श बुक करें।",
+                formTypeLabel: "मीटिंग का प्रकार",
+                formTypePlaceholder: "मीटिंग का प्रकार चुनें",
+                typeVideo: "वीडियो कॉल (ज़ूम/जीमीट)",
+                typePhone: "फ़ोन कॉल (स्थानीय/क्षेत्रीय)",
+                typeInPerson: "व्यक्तिगत मुलाकात (कार्यालय दौरा)",
+                formDateLabel: "तिथि चुनें",
+                formTimeLabel: "समय स्लॉट चुनें (15 मिनट)",
+                formIssueLabel: "अपनी समस्या का संक्षिप्त वर्णन करें",
+                formIssuePlaceholder: "जैसे, 'जॉब #1234 पर भुगतान की समस्या' या 'प्रोफ़ाइल सेटअप में सहायता चाहिए'",
+                managerTitle: "आपकी संचार प्रबंधक",
+                managerName: "आशा शर्मा",
+                managerRole: "श्रमिक सफलता और शिकायत प्रमुख",
+                managerBio: "आशा सभी निर्धारित श्रमिक मीटिंगों को संभालती हैं, जो त्वरित विवाद समाधान, भुगतान समस्याओं और प्लेटफ़ॉर्म मार्गदर्शन पर ध्यान केंद्रित करती हैं।",
+                managerContact: "संपर्क समय: सोम-शुक्र, सुबह 10:00 बजे से शाम 5:00 बजे तक (आईएसटी)",
+                statusAvailable: "🟢 अभी उपलब्ध: तुरंत बुक करें!",
+                statusUnavailable: "🔴 अनुपलब्ध: कृपया कोई अन्य समय चुनें।",
+                statusPending: "उपलब्धता की जाँच हो रही है...",
+                buttonSubmit: "मीटिंग शेड्यूल की पुष्टि करें",
+                footerText: "हम अपने कार्यबल के लिए समर्पित, मानवीय सहायता प्रदान करने के लिए प्रतिबद्ध हैं।",
+            },
+            mr: {
+                 pageTitle: "मीटिंग शेड्यूल करा",
+                selectLang: "भाषा निवडा",
+                heroHeading: "आमच्या सपोर्ट टीमशी कनेक्ट व्हा",
+                heroSubheading: "त्वरित समर्थन, समस्या निराकरण किंवा व्यावसायिक चौकशीसाठी 15 मिनिटांचे सल्लामसलत बुक करा.",
+                formTypeLabel: "मीटिंगचा प्रकार",
+                formTypePlaceholder: "मीटिंगचा प्रकार निवडा",
+                typeVideo: "व्हिडिओ कॉल (झूम/जीमीट)",
+                typePhone: "फोन कॉल (स्थानिक/प्रादेशिक)",
+                typeInPerson: "प्रत्यक्ष भेट (कार्यालय भेट)",
+                formDateLabel: "तारीख निवडा",
+                formTimeLabel: "वेळ स्लॉट निवडा (15 मिनिटे)",
+                formIssueLabel: "तुमच्या समस्येचे थोडक्यात वर्णन करा",
+                formIssuePlaceholder: "उदा., 'जॉब #1234 वर पेमेंटची समस्या' किंवा 'प्रोफाइल सेटअपनसाठी मदत हवी आहे'",
+                managerTitle: "तुमचे संवाद व्यवस्थापक",
+                managerName: "आशा शर्मा",
+                managerRole: "कामगार यश आणि तक्रार प्रमुख",
+                managerBio: "आशा सर्व नियोजित कामगार मीटिंग हाताळतात, त्वरित विवाद निराकरण, पेमेंट समस्या आणि प्लॅटफॉर्म मार्गदर्शनावर लक्ष केंद्रित करतात।",
+                managerContact: "संपर्क वेळ: सोम-शुक्र, स. 10:00 ते सायं. 5:00 (IST)",
+                statusAvailable: "🟢 आता उपलब्ध: त्वरित बुक करा!",
+                statusUnavailable: "🔴 अनुपलब्ध: कृपया दुसरी वेळ निवडा।",
+                statusPending: "उपलब्धता तपासत आहे...",
+                buttonSubmit: "मीटिंग शेड्यूलची पुष्टी करा",
+                footerText: "आम्ही आमच्या कार्यबलासाठी समर्पित, मानवी समर्थन प्रदान करण्यास वचनबद्ध आहोत।",
+            },
+             bn: {
+                pageTitle: "একটি মিটিং শিডিউল করুন",
+                selectLang: "ভাষা নির্বাচন করুন",
+                heroHeading: "আমাদের সহায়তা দলের সাথে সংযোগ করুন",
+                heroSubheading: "জরুরী সমর্থন, সমস্যা সমাধান বা ব্যবসার অনুসন্ধানের জন্য 15 মিনিটের পরামর্শ বুক করুন।",
+                formTypeLabel: "মিটিং এর প্রকার",
+                formTypePlaceholder: "মিটিং এর প্রকার নির্বাচন করুন",
+                typeVideo: "ভিডিও কল (জুম/জিমিট)",
+                typePhone: "ফোন কল (স্থানীয়/আঞ্চলিক)",
+                typeInPerson: "ব্যক্তিগতভাবে (অফিস পরিদর্শন)",
+                formDateLabel: "তারিখ নির্বাচন করুন",
+                formTimeLabel: "সময় স্লট নির্বাচন করুন (15 মিনিট)",
+                formIssueLabel: "আপনার সমস্যার সংক্ষিপ্ত বিবরণ দিন",
+                formIssuePlaceholder: "যেমন, 'জব #1234 এ পেমেন্টের সমস্যা' বা 'প্রোফাইল সেটআপে সাহায্যের প্রয়োজন'",
+                managerTitle: "আপনার যোগাযোগ ব্যবস্থাপক",
+                managerName: "আশা শর্মা",
+                managerRole: "শ্রমিক সাফল্য ও অভিযোগ প্রধান",
+                managerBio: "আশা সমস্ত নির্ধারিত শ্রমিক মিটিং পরিচালনা করেন, দ্রুত বিরোধ নিষ্পত্তি, পেমেন্টের সমস্যা এবং প্ল্যাটফর্ম নির্দেশনার উপর মনোযোগ দেন।",
+                managerContact: "যোগাযোগের সময়: সোম-শুক্র, সকাল 10:00 থেকে বিকেল 5:00 (IST)",
+                statusAvailable: "🟢 এখন উপলব্ধ: অবিলম্বে বুক করুন!",
+                statusUnavailable: "🔴 অনুপলব্ধ: দয়া করে অন্য একটি সময় নির্বাচন করুন।",
+                statusPending: "উপস্থিতি পরীক্ষা করা হচ্ছে...",
+                buttonSubmit: "মিটিং শিডিউল নিশ্চিত করুন",
+                footerText: "আমরা আমাদের কর্মশক্তির জন্য নিবেদিত, মানবিক সহায়তা প্রদানে প্রতিশ্রুতিবদ্ধ।",
+            },
+             te: {
+                pageTitle: "ఒక సమావేశాన్ని షెడ్యూల్ చేయండి",
+                selectLang: "భాషను ఎంచుకోండి",
+                heroHeading: "మా మద్దతు బృందంతో కనెక్ట్ అవ్వండి",
+                heroSubheading: "అత్యవసర మద్దతు, సమస్య పరిష్కారం లేదా వ్యాపార విచారణల కోసం 15 నిమిషాల సంప్రదింపులను బుక్ చేయండి.",
+                formTypeLabel: "సమావేశ రకం",
+                formTypePlaceholder: "సమావేశ రకాన్ని ఎంచుకోండి",
+                typeVideo: "వీడియో కాల్ (జూమ్/జీమీట్)",
+                typePhone: "ఫోన్ కాల్ (స్థానిక/ప్రాంతీయ)",
+                typeInPerson: "వ్యక్తిగతంగా (కార్యాలయ సందర్శన)",
+                formDateLabel: "తేదీని ఎంచుకోండి",
+                formTimeLabel: "సమయ స్లాట్‌ను ఎంచుకోండి (15 నిమిషాలు)",
+                formIssueLabel: "మీ సమస్యను సంక్షిప్తంగా వివరించండి",
+                formIssuePlaceholder: "ఉదా., 'జాబ్ #1234లో చెల్లింపు సమస్య' లేదా 'ప్రొఫైల్ సెటప్‌లో సహాయం కావాలి'",
+                managerTitle: "మీ కమ్యూనికేషన్ మేనేజర్",
+                managerName: "ఆశా శర్మ",
+                managerRole: "కార్మికుల విజయం & ఫిర్యాదుల నాయకురాలు",
+                managerBio: "ఆశా అన్ని షెడ్యూల్ చేయబడిన కార్మికుల సమావేశాలను నిర్వహిస్తుంది, త్వరిత వివాద పరిష్కారం, చెల్లింపు సమస్యలు మరియు ప్లాట్‌ఫారమ్ మార్గదర్శకత్వంపై దృష్టి పెడుతుంది.",
+                managerContact: "సంప్రదింపు సమయాలు: సోమ-శుక్ర, ఉదయం 10:00 నుండి సాయంత్రం 5:00 వరకు (IST)",
+                statusAvailable: "🟢 ఇప్పుడే అందుబాటులో ఉంది: తక్షణమే బుక్ చేసుకోండి!",
+                statusUnavailable: "🔴 అందుబాటులో లేదు: దయచేసి మరొక సమయాన్ని ఎంచుకోండి.",
+                statusPending: "అందుబాటులో ఉందో లేదో తనిఖీ చేస్తోంది...",
+                buttonSubmit: "సమావేశ షెడ్యూల్‌ను నిర్ధారించండి",
+                footerText: "మా శ్రామిక శక్తికి అంకితమైన, మానవ మద్దతును అందించడానికి మేము కట్టుబడి ఉన్నాము।",
+            },
+            ta: {
+                pageTitle: "ஒரு கூட்டத்தை திட்டமிடுங்கள்",
+                selectLang: "மொழியைத் தேர்ந்தெடுக்கவும்",
+                heroHeading: "எங்கள் ஆதரவு குழுவுடன் இணையுங்கள்",
+                heroSubheading: "அவசர ஆதரவு, சிக்கல் தீர்வு அல்லது வணிக விசாரணைகளுக்காக 15 நிமிட ஆலோசனையை முன்பதிவு செய்யுங்கள்.",
+                formTypeLabel: "கூட்ட வகை",
+                formTypePlaceholder: "கூட்ட வகையைத் தேர்ந்தெடுக்கவும்",
+                typeVideo: "வீடியோ அழைப்பு (ஜூம்/ஜிமீட்)",
+                typePhone: "தொலைபேசி அழைப்பு (உள்ளூர்/பிராந்திய)",
+                typeInPerson: "நேரில் (அலுவலக வருகை)",
+                formDateLabel: "தேதியைத் தேர்ந்தெடுக்கவும்",
+                formTimeLabel: "நேர ஸ்லாட்டைத் தேர்ந்தெடுக்கவும் (15 நிமிடம்)",
+                formIssueLabel: "உங்கள் சிக்கலை சுருக்கமாக விவரிக்கவும்",
+                formIssuePlaceholder: "எ.கா., 'வேலை #1234 இல் கட்டணச் சிக்கல்' அல்லது 'சுயவிவர அமைப்பிற்கு உதவி தேவை'",
+                managerTitle: "உங்கள் தொடர்பு மேலாளர்",
+                managerName: "ஆஷா சர்மா",
+                managerRole: "தொழிலாளர் வெற்றி மற்றும் குறை தீர்க்கும் தலைவர்",
+                managerBio: "ஆஷா அனைத்து திட்டமிடப்பட்ட தொழிலாளர் கூட்டங்களையும் கையாளுகிறார், விரைவான தகராறு தீர்வு, கட்டணச் சிக்கல்கள் மற்றும் தள வழிகாட்டுதலில் கவனம் செலுத்துகிறார்.",
+                managerContact: "தொடர்பு நேரம்: திங்கள்-வெள்ளி, காலை 10:00 முதல் மாலை 5:00 மணி வரை (IST)",
+                statusAvailable: "🟢 இப்போது கிடைக்கிறது: உடனடியாக முன்பதிவு செய்யுங்கள்!",
+                statusUnavailable: "🔴 கிடைக்கவில்லை: தயவுசெய்து வேறு நேரத்தைத் தேர்ந்தெடுக்கவும்.",
+                statusPending: "கிடைக்குமா என்று சரிபார்க்கிறது...",
+                buttonSubmit: "கூட்ட அட்டவணையை உறுதிப்படுத்தவும்",
+                footerText: "எங்கள் பணியாளர்களுக்கு அர்ப்பணிக்கப்பட்ட, மனித ஆதரவை வழங்க நாங்கள் உறுதிபூண்டுள்ளோம்.",
+            }
+        };
+
+        let currentLang = 'en';
+        let isAvailable = false; 
+
+        const checkAvailability = () => {
+            const timeSelect = document.getElementById('timeSelect');
+            const statusMessage = document.getElementById('availabilityStatus');
+            const submitButton = document.getElementById('submitButton');
+            const t = translations[currentLang];
+
+            if (!timeSelect.value) {
+                statusMessage.textContent = t.statusPending;
+                statusMessage.className = 'text-gray-400 text-sm italic mt-2';
+                submitButton.disabled = true;
+                submitButton.className = submitButton.className.replace(/bg-accent-blue hover:bg-\[\#79bfff\]/, 'bg-gray-600 cursor-not-allowed');
+                return;
+            }
+
+            const minute = timeSelect.value.split(':')[1];
+            
+            // Simulation: Available if minutes are 00 or 30, Unavailable if 15 or 45
+            isAvailable = (minute === '00' || minute === '30'); 
+
+            if (isAvailable) {
+                statusMessage.textContent = t.statusAvailable;
+                statusMessage.className = 'text-status-green font-semibold text-sm mt-2';
+                submitButton.disabled = false;
+                submitButton.className = 'w-full py-3 px-4 rounded-xl font-bold text-bg-darkest bg-accent-blue hover:bg-[#79bfff] transition duration-300';
+            } else {
+                statusMessage.textContent = t.statusUnavailable;
+                statusMessage.className = 'text-status-red font-semibold text-sm mt-2';
+                submitButton.disabled = true;
+                submitButton.className = 'w-full py-3 px-4 rounded-xl font-bold text-bg-darkest bg-gray-600 cursor-not-allowed transition duration-300';
+            }
+        };
+
+        const changeLanguage = (lang) => {
+            currentLang = lang;
+            const t = translations[lang];
+
+            // Update all text elements by ID
+            document.title = t.pageTitle + " | UdyogSathi";
+            document.getElementById('pageTitle').textContent = t.pageTitle;
+            document.getElementById('langSelectLabel').textContent = t.selectLang;
+            document.getElementById('heroHeading').textContent = t.heroHeading;
+            document.getElementById('heroSubheading').textContent = t.heroSubheading;
+            document.getElementById('formTypeLabel').textContent = t.formTypeLabel;
+            document.getElementById('formTypePlaceholder').textContent = t.formTypePlaceholder;
+            document.getElementById('typeVideo').textContent = t.typeVideo;
+            document.getElementById('typePhone').textContent = t.typePhone;
+            document.getElementById('typeInPerson').textContent = t.typeInPerson;
+            document.getElementById('formDateLabel').textContent = t.formDateLabel;
+            document.getElementById('formTimeLabel').textContent = t.formTimeLabel;
+            document.getElementById('formIssueLabel').textContent = t.formIssueLabel;
+            document.getElementById('formIssue').placeholder = t.formIssuePlaceholder;
+            document.getElementById('managerTitle').textContent = t.managerTitle;
+            document.getElementById('managerName').textContent = t.managerName;
+            document.getElementById('managerRole').textContent = t.managerRole;
+            document.getElementById('managerBio').textContent = t.managerBio;
+            document.getElementById('managerContact').textContent = t.managerContact;
+            document.getElementById('submitButton').textContent = t.buttonSubmit;
+            document.getElementById('footerText').textContent = t.footerText;
+            checkAvailability(); // Re-check availability status to update message text
+        };
+        
+        const getTodayDate = () => {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        };
+
+        // --- Firebase Initialization ---
+        const initFirebase = async () => {
+            try {
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Set Firestore logging to debug
+                setLogLevel('Debug');
+
+                // Sign in using the custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // Set userId after authentication
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log(`Firebase Initialized. User ID: ${userId}`);
+                    } else {
+                        // Fallback if sign-in fails
+                        userId = crypto.randomUUID();
+                        console.warn('Authentication failed, using anonymous UUID.');
+                    }
+                    // Re-check availability once user ID is ready
+                    checkAvailability();
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showMessage("Error: Database connection failed.", 'error');
+            }
+        };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load Firebase modules
+            const firebaseScript = document.createElement('script');
+            firebaseScript.type = 'module';
+            firebaseScript.innerHTML = `
+                import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+                import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+                import { getFirestore, collection, addDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+                
+                window.initializeApp = initializeApp;
+                window.getAuth = getAuth;
+                window.signInAnonymously = signInAnonymously;
+                window.signInWithCustomToken = signInWithCustomToken;
+                window.onAuthStateChanged = onAuthStateChanged;
+                window.getFirestore = getFirestore;
+                window.collection = collection;
+                window.addDoc = addDoc;
+                window.setLogLevel = setLogLevel;
+
+                initFirebase();
+            `;
+            document.head.appendChild(firebaseScript);
+
+            // Set up event listeners
+            document.getElementById('langSelect').addEventListener('change', (e) => changeLanguage(e.target.value));
+            document.getElementById('timeSelect').addEventListener('change', checkAvailability);
+            document.getElementById('dateSelect').addEventListener('change', checkAvailability);
+
+            // Set min date for date input to today
+            document.getElementById('dateSelect').min = getTodayDate();
+            
+            // Set the initial language
+            changeLanguage(currentLang);
+        });
+
+    </script>
+
+    <style>
+        /* Custom styles for a modern, clean dark look */
+        body {
+            background-color: #161B22; /* bg-medium */
+            color: #F0F6FC; /* text-light */
+            font-family: 'Inter', sans-serif;
+        }
+        .header-bg {
+            background-color: #0D1117; /* bg-darkest */
+        }
+        .form-card {
+            background-color: #21262D; /* bg-light */
+            border: 1px solid #30363D;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+        .input-field {
+            background-color: #161B22; /* Slightly darker than card for contrast */
+            border: 1px solid #30363D;
+            color: #F0F6FC;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            transition: border-color 0.2s;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: #58A6FF;
+            box-shadow: 0 0 0 1px #58A6FF;
+        }
+        .manager-card {
+            background-color: #0D1117; /* Darkest background for a rich look */
+            border-left: 5px solid #58A6FF;
+            box-shadow: 0 0 20px rgba(88, 166, 255, 0.2);
+        }
+        .submit-button {
+            transition: all 0.3s;
+        }
+        .submit-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Message Box (Toast Notification) -->
+    <div id="messageBox" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-2xl z-50 transform translate-y-full opacity-0 transition-all duration-300 text-text-light flex items-center space-x-3" style="min-width: 250px;">
+        <span id="messageIcon" class="text-xl font-bold">i</span>
+        <span id="messageText" class="font-medium"></span>
+        <button onclick="document.getElementById('messageBox').style.opacity = '0';" class="ml-auto text-sm opacity-70 hover:opacity-100">
+            &times;
+        </button>
+    </div>
+
+    <!-- Header & Language Selector -->
+    <header class="header-bg shadow-xl sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center">
+            
+            <!-- Logo/Title -->
+            <a href="#" class="flex items-center space-x-2 text-xl font-extrabold text-secondary-gold tracking-tight">
+                <span id="pageTitle">Schedule a Meeting</span>
+            </a>
+
+            <!-- Language Dropdown -->
+            <div class="flex items-center space-x-2 text-text-light">
+                <label id="langSelectLabel" for="langSelect" class="text-sm font-medium text-gray-300 hidden sm:block">Select Language</label>
+                <select id="langSelect" class="block py-2 px-3 border border-gray-600 bg-bg-light rounded-lg shadow-sm focus:outline-none focus:ring-accent-blue focus:border-accent-blue sm:text-sm">
+                    <option value="en">English</option>
+                    <option value="hi">हिन्दी (Hindi)</option>
+                    <option value="mr">मराठी (Marathi)</option>
+                    <option value="bn">বাংলা (Bengali)</option>
+                    <option value="te">తెలుగు (Telugu)</option>
+                    <option value="ta">தமிழ் (Tamil)</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow py-12 md:py-16 bg-bg-medium">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            
+            <!-- Hero Section -->
+            <div class="text-center mb-12">
+                <h1 id="heroHeading" class="text-4xl sm:text-5xl font-extrabold text-accent-blue mb-3">
+                    Connect with Our Support Team
+                </h1>
+                <p id="heroSubheading" class="text-xl text-gray-400 max-w-3xl mx-auto">
+                    Book a 15-minute consultation for urgent support, issue resolution, or business inquiries.
+                </p>
+                <p class="text-sm text-gray-500 mt-2">Your User ID (for private data): <span class="font-mono text-gray-400" id="currentUserId">Loading...</span></p>
+            </div>
+
+            <!-- Two-Column Layout for Form and Manager Tile -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
+
+                <!-- Column 1: Advanced Scheduling Form -->
+                <div class="lg:col-span-2 form-card p-6 md:p-10 rounded-2xl">
+                    <h2 class="text-2xl font-bold text-text-light mb-6 border-b border-gray-700 pb-3">
+                        Advanced Meeting Scheduler
+                    </h2>
+                    <form id="meetingForm" onsubmit="scheduleMeeting(event)" class="space-y-6">
+                        
+                        <!-- 1. Meeting Type (Dropdown) -->
+                        <div>
+                            <label id="formTypeLabel" for="meetingType" class="block text-sm font-medium text-gray-300 mb-2">Meeting Type</label>
+                            <select id="meetingType" required class="input-field w-full">
+                                <option id="formTypePlaceholder" value="" disabled selected>Select meeting type</option>
+                                <option id="typeVideo" value="Video Call">Video Call (Zoom/GMeet)</option>
+                                <option id="typePhone" value="Phone Call">Phone Call (Local/Regional)</option>
+                                <option id="typeInPerson" value="In-Person">In-Person (Office Visit)</option>
+                            </select>
+                        </div>
+
+                        <!-- 2. Date and Time (Advanced Pickers) -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label id="formDateLabel" for="dateSelect" class="block text-sm font-medium text-gray-300 mb-2">Select Date</label>
+                                <input type="date" id="dateSelect" required class="input-field w-full">
+                            </div>
+                            <div>
+                                <label id="formTimeLabel" for="timeSelect" class="block text-sm font-medium text-gray-300 mb-2">Select Time Slot (15 Min)</label>
+                                <select id="timeSelect" required class="input-field w-full">
+                                    <option value="" disabled selected>--:--</option>
+                                    <!-- Slots (15-minute intervals, covering business hours) -->
+                                    <option value="10:00">10:00 AM - 10:15 AM</option>
+                                    <option value="10:15">10:15 AM - 10:30 AM</option>
+                                    <option value="10:30">10:30 AM - 10:45 AM</option>
+                                    <option value="10:45">10:45 AM - 11:00 AM</option>
+                                    <option value="11:00">11:00 AM - 11:15 AM</option>
+                                    <option value="11:15">11:15 AM - 11:30 AM</option>
+                                    <option value="11:30">11:30 AM - 11:45 AM</option>
+                                    <option value="11:45">11:45 AM - 12:00 PM</option>
+                                    <option value="14:00">02:00 PM - 02:15 PM</option>
+                                    <option value="14:15">02:15 PM - 02:30 PM</option>
+                                    <option value="14:30">02:30 PM - 02:45 PM</option>
+                                    <option value="14:45">02:45 PM - 03:00 PM</option>
+                                    <option value="16:00">04:00 PM - 04:15 PM</option>
+                                    <option value="16:15">04:15 PM - 04:30 PM</option>
+                                    <option value="16:30">04:30 PM - 04:45 PM</option>
+                                </select>
+                                <p id="availabilityStatus" class="text-gray-400 text-sm italic mt-2">Checking availability...</p>
+                            </div>
+                        </div>
+
+                        <!-- 3. Issue Description -->
+                        <div>
+                            <label id="formIssueLabel" for="formIssue" class="block text-sm font-medium text-gray-300 mb-2">Briefly Describe Your Issue</label>
+                            <textarea id="formIssue" rows="3" required class="input-field w-full" placeholder="e.g., 'Payment issue on Job #1234' or 'Need help with profile setup'"></textarea>
+                        </div>
+                        
+                        <!-- 4. Submit Button (Dynamic) -->
+                        <button id="submitButton" type="submit" disabled class="submit-button w-full py-3 px-4 rounded-xl font-bold text-bg-darkest bg-gray-600 cursor-not-allowed">
+                            Confirm Meeting Schedule
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Column 2: Communication Manager Tile -->
+                <div class="lg:col-span-1">
+                    <div class="manager-card p-8 rounded-2xl text-center space-y-4 h-full">
+                        <h3 id="managerTitle" class="text-2xl font-extrabold text-accent-blue mb-4 border-b border-gray-700 pb-2">
+                            Your Communication Manager
+                        </h3>
+                        
+                        <!-- Manager Picture Place -->
+                        <div class="w-32 h-32 mx-auto rounded-full bg-bg-light border-4 border-secondary-gold flex items-center justify-center overflow-hidden">
+                            <!-- Placeholder image: Asha Sharma -->
+                            <img src="https://placehold.co/128x128/30363D/F0F6FC?text=Asha+S." alt="Asha Sharma Profile Placeholder" class="w-full h-full object-cover p-2" onerror="this.onerror=null; this.src='https://placehold.co/128x128/30363D/F0F6FC?text=Manager+Profile';" />
+                        </div>
+
+                        <h4 id="managerName" class="text-3xl font-bold text-text-light mt-4">SUKRITI SINGH</h4>
+                        <p id="managerRole" class="text-lg font-medium text-secondary-gold">Worker Success & Grievance Lead</p>
+                        
+                        <p id="managerBio" class="text-gray-400 text-sm pt-2 border-t border-gray-800">
+                            Asha handles all scheduled worker meetings, focusing on quick dispute resolution, payment issues, and platform guidance.
+                        </p>
+
+                        <p id="managerContact" class="text-sm text-gray-500 italic mt-4">
+                            Contact Hours: Mon-Fri, 10:00 AM to 5:00 PM (IST)
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="header-bg pt-8 pb-4 text-gray-300">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p id="footerText" class="text-sm text-gray-500">
+                We are committed to providing dedicated, human support for our workforce.
+            </p>
+            <p class="text-xs text-gray-600 mt-4">&copy; 2025 UdyogSathi. All rights reserved.</p>
+        </div>
+    </footer>
+
+</body>
+</html>
